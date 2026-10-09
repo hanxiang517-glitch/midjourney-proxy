@@ -1,4 +1,4 @@
-﻿// Midjourney Proxy - Proxy for Midjourney's Discord, enabling AI drawings via API with one-click face swap. A free, non-profit drawing API project.
+// Midjourney Proxy - Proxy for Midjourney's Discord, enabling AI drawings via API with one-click face swap. A free, non-profit drawing API project.
 // Copyright (C) 2024 trueai.org
 
 // This program is free software: you can redistribute it and/or modify
@@ -836,156 +836,7 @@ namespace Midjourney.Services
                         var title = t.GetString();
                         if (!string.IsNullOrWhiteSpace(title) && "Action required to continue".Equals(title, StringComparison.OrdinalIgnoreCase))
                         {
-                            _logger.Warning("CF 验证 {@0}, {@1}", Account.ChannelId, raw.ToString());
-
-                            // 全局锁定中
-                            // 等待人工处理或者自动处理
-                            // 重试最多 3 次，最多处理 5 分钟
-                            LocalLock.TryLock($"cf_{Account.ChannelId}", TimeSpan.FromSeconds(10), () =>
-                            {
-                                try
-                                {
-                                    var custom_id = data.TryGetProperty("custom_id", out var c) ? c.GetString() : string.Empty;
-                                    var application_id = data.TryGetProperty("application", out var a) && a.TryGetProperty("id", out var id) ? id.GetString() : string.Empty;
-                                    if (!string.IsNullOrWhiteSpace(custom_id) && !string.IsNullOrWhiteSpace(application_id))
-                                    {
-                                        Account.Lock = true;
-
-                                        // MJ::iframe::U3NmeM-lDTrmTCN_QY5n4DXvjrQRPGOZrQiLa-fT9y3siLA2AGjhj37IjzCqCtVzthUhGBj4KKqNSntQ
-                                        var hash = custom_id.Split("::").LastOrDefault();
-                                        var hashUrl = $"https://{application_id}.discordsays.com/captcha/api/c/{hash}/ack?hash=1";
-
-                                        // 验证中，处于锁定模式
-                                        Account.DisabledReason = "CF 自动验证中...";
-                                        Account.CfHashUrl = hashUrl;
-                                        Account.CfHashCreated = DateTime.Now;
-                                        _freeSql.Update(Account);
-                                        Account.ClearCache();
-
-                                        try
-                                        {
-                                            // 通知验证服务器
-                                            if (!string.IsNullOrWhiteSpace(setting.CaptchaNotifyHook) && !string.IsNullOrWhiteSpace(setting.CaptchaServer))
-                                            {
-                                                // 使用 restsharp 通知，最多 3 次
-                                                var notifyCount = 0;
-                                                do
-                                                {
-                                                    if (notifyCount > 3)
-                                                    {
-                                                        break;
-                                                    }
-
-                                                    notifyCount++;
-                                                    var notifyUrl = $"{setting.CaptchaServer.Trim().TrimEnd('/')}/cf/verify";
-                                                    var client = new RestClient();
-                                                    var request = new RestRequest(notifyUrl, Method.Post);
-                                                    request.AddHeader("Content-Type", "application/json");
-                                                    var body = new CaptchaVerfyRequest
-                                                    {
-                                                        Url = hashUrl,
-                                                        State = Account.ChannelId,
-                                                        NotifyHook = setting.CaptchaNotifyHook,
-                                                        Secret = setting.CaptchaNotifySecret
-                                                    };
-                                                    var json = Newtonsoft.Json.JsonConvert.SerializeObject(body);
-                                                    request.AddJsonBody(json);
-                                                    var response = client.Execute(request);
-                                                    if (response.StatusCode == System.Net.HttpStatusCode.OK)
-                                                    {
-                                                        // 已通知自动验证服务器
-                                                        _logger.Information("CF 验证，已通知服务器 {@0}, {@1}", Account.ChannelId, hashUrl);
-
-                                                        break;
-                                                    }
-
-                                                    Thread.Sleep(1000);
-                                                } while (true);
-
-                                                Task.Run(async () =>
-                                                {
-                                                    try
-                                                    {
-                                                        await EmailHelper.Instance.EmailSend(setting.Smtp, $"CF自动真人验证-{Account.ChannelId}", hashUrl);
-                                                    }
-                                                    catch (Exception ex)
-                                                    {
-                                                        _logger.Error(ex, "邮件发送失败");
-                                                    }
-                                                });
-                                            }
-                                            else
-                                            {
-                                                // 发送 hashUrl GET 请求, 返回 {"hash":"OOUxejO94EQNxsCODRVPbg","token":"dXDm-gSb4Zlsx-PCkNVyhQ"}
-                                                // 通过 hash 和 token 拼接验证 CF 验证 URL
-
-                                                WebProxy webProxy = null;
-                                                var proxy = GlobalConfiguration.Setting.Proxy;
-                                                if (!string.IsNullOrEmpty(proxy?.Host))
-                                                {
-                                                    webProxy = new WebProxy(proxy.Host, proxy.Port ?? 80);
-                                                }
-                                                var hch = new HttpClientHandler
-                                                {
-                                                    UseProxy = webProxy != null,
-                                                    Proxy = webProxy
-                                                };
-
-                                                var httpClient = new HttpClient(hch);
-                                                var response = httpClient.GetAsync(hashUrl).Result;
-                                                var con = response.Content.ReadAsStringAsync().Result;
-                                                if (!string.IsNullOrWhiteSpace(con))
-                                                {
-                                                    // 解析
-                                                    var json = JsonSerializer.Deserialize<JsonElement>(con);
-                                                    if (json.TryGetProperty("hash", out var h) && json.TryGetProperty("token", out var to))
-                                                    {
-                                                        var hashStr = h.GetString();
-                                                        var token = to.GetString();
-
-                                                        if (!string.IsNullOrWhiteSpace(hashStr) && !string.IsNullOrWhiteSpace(token))
-                                                        {
-                                                            // 发送验证 URL
-                                                            // 通过 hash 和 token 拼接验证 CF 验证 URL
-                                                            // https://editor.midjourney.com/captcha/challenge/index.html?hash=OOUxejO94EQNxsCODRVPbg&token=dXDm-gSb4Zlsx-PCkNVyhQ
-
-                                                            var url = $"https://editor.midjourney.com/captcha/challenge/index.html?hash={hashStr}&token={token}";
-
-                                                            _logger.Information($"{Account.ChannelId}, CF 真人验证 URL: {url}");
-
-                                                            Account.CfUrl = url;
-
-                                                            Task.Run(async () =>
-                                                            {
-                                                                try
-                                                                {
-                                                                    await EmailHelper.Instance.EmailSend(setting.Smtp, $"CF手动真人验证-{Account.ChannelId}", url);
-                                                                }
-                                                                catch (Exception ex)
-                                                                {
-                                                                    _logger.Error(ex, "邮件发送失败");
-                                                                }
-                                                            });
-                                                        }
-                                                    }
-                                                }
-
-                                                Account.DisabledReason = "CF 人工验证...";
-                                                _freeSql.Update(Account);
-                                                Account.ClearCache();
-                                            }
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            _logger.Error(ex, "CF 真人验证处理失败 {@0}", Account.ChannelId);
-                                        }
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.Error(ex, "CF 真人验证处理异常 {@0}", Account.ChannelId);
-                                }
-                            });
+                            DisableAccount("需要人工验证：请在官方客户端处理，并检查任务结果后手动恢复", allowAutoLogin: false);
 
                             return;
                         }
@@ -2085,6 +1936,9 @@ namespace Midjourney.Services
         /// <param name="reason"></param>
         private async Task HandleFailure(int code, string reason)
         {
+            if (_isDispose || Account.Enable != true)
+                return;
+
             _logger.Error("用户 WebSocket 连接失败, 代码 {0}: {1}, {2}", code, reason, Account.ChannelId);
 
             if (!Running)
@@ -2093,6 +1947,15 @@ namespace Midjourney.Services
             }
 
             Running = false;
+
+            if (_isDispose || Account.Enable != true)
+                return;
+
+            if (DiscordConnectionPolicy.RequiresManualReview(code))
+            {
+                DisableAccount($"Discord 网关 {code}：请人工检查凭据或配置后恢复", allowAutoLogin: false);
+                return;
+            }
 
             if (code >= 4000)
             {
@@ -2114,46 +1977,19 @@ namespace Midjourney.Services
         /// <summary>
         /// 重新连接
         /// </summary>
-        private async Task TryReconnect()
-        {
-            try
-            {
-                if (_isDispose)
-                {
-                    return;
-                }
-
-                var success = await StartAsync(true);
-                if (!success)
-                {
-                    _logger.Warning("用户重新连接失败 {@0}，尝试新连接", Account.ChannelId);
-
-                    await Task.Delay(1000);
-
-                    await TryNewConnect();
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.Warning(ex, "用户重新连接异常 {@0}，尝试新连接", Account.ChannelId);
-
-                await Task.Delay(1000);
-
-                await TryNewConnect();
-            }
-        }
+        private Task TryReconnect() => TryNewConnect(resume: true);
 
         /// <summary>
         /// 新的连接
         /// </summary>
-        private async Task TryNewConnect()
+        private async Task TryNewConnect(bool resume = false)
         {
-            if (_isDispose)
+            if (_isDispose || Account.Enable != true)
             {
                 return;
             }
 
-            await using var lockObj = await AdaptiveLock.LockAsync("TryNewConnect", 3);
+            using var lockObj = await AsyncKeyedLock.TryLockAsync($"DiscordReconnect:{Account.Id}", TimeSpan.FromMilliseconds(1));
             if (lockObj.IsAcquired == false)
             {
                 _logger.Warning("新的连接作业正在执行中，禁止重复执行");
@@ -2171,12 +2007,17 @@ namespace Midjourney.Services
                     {
                         _logger.Warning("新的连接失败次数超过限制，禁用账号");
 
-                        DisableAccount("新的连接失败次数超过限制，禁用账号");
+                        DisableAccount("新的连接失败次数超过限制，请人工检查后恢复", allowAutoLogin: false);
 
                         return;
                     }
 
-                    var success = await StartAsync();
+                    await Task.Delay(DiscordConnectionPolicy.ReconnectDelay(count));
+                    if (_isDispose || Account.Enable != true)
+                        return;
+
+                    var success = await StartAsync(resume);
+                    resume = false;
                     if (success)
                     {
                         return;
@@ -2186,7 +2027,6 @@ namespace Midjourney.Services
                 {
                     _logger.Warning(e, "用户新连接失败, 第 {@0} 次, {@1}", i, Account.ChannelId);
 
-                    await Task.Delay(5000);
                 }
             }
 
@@ -2194,14 +2034,16 @@ namespace Midjourney.Services
             {
                 _logger.Error("由于无法重新连接，自动禁用账号");
 
-                DisableAccount("由于无法重新连接，自动禁用账号");
+                DisableAccount("由于无法重新连接，请人工检查后恢复", allowAutoLogin: false);
             }
         }
 
         /// <summary>
         /// 停止并禁用账号
         /// </summary>
-        public void DisableAccount(string msg)
+        public void DisableAccount(string msg) => DisableAccount(msg, allowAutoLogin: true);
+
+        public void DisableAccount(string msg, bool allowAutoLogin)
         {
             try
             {
@@ -2218,7 +2060,7 @@ namespace Midjourney.Services
                 var setting = GlobalConfiguration.Setting;
                 var info = new StringBuilder();
                 var account = Account;
-                if (setting.EnableAutoLogin)
+                if (allowAutoLogin && setting.EnableAutoLogin)
                 {
                     sw.Stop();
                     info.AppendLine($"{account.Id}尝试自动登录...");
