@@ -1,4 +1,4 @@
-﻿// Midjourney Proxy - Proxy for Midjourney's Discord, enabling AI drawings via API with one-click face swap. A free, non-profit drawing API project.
+// Midjourney Proxy - Proxy for Midjourney's Discord, enabling AI drawings via API with one-click face swap. A free, non-profit drawing API project.
 // Copyright (C) 2024 trueai.org
 
 // This program is free software: you can redistribute it and/or modify
@@ -68,6 +68,7 @@ namespace Midjourney.Services
         private readonly CancellationTokenSource _longToken;
 
         private readonly HttpClient _httpClient;
+        private readonly DiscordInteractionTransport _interactionTransport = new();
         private readonly Dictionary<string, string> _paramsMap;
 
         private readonly string _discordInteractionUrl;
@@ -3913,14 +3914,14 @@ namespace Midjourney.Services
             await _httpClient.SendAsync(request);
         }
 
-        private async Task<HttpResponseMessage> PostJsonAsync(string url, string paramsStr)
+        private async Task<HttpResponseMessage> PostJsonAsync(string url, string paramsStr, CancellationToken cancellationToken = default)
         {
             //if (!JwtTokenValidate(Account.UserToken))
             //{
             //    throw new LogicException(ReturnCode.VALIDATION_ERROR, "令牌错误");
             //}
 
-            HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, url)
+            using var request = new HttpRequestMessage(HttpMethod.Post, url)
             {
                 Content = new StringContent(paramsStr, Encoding.UTF8, "application/json")
             };
@@ -3930,123 +3931,46 @@ namespace Midjourney.Services
             // 设置 request Authorization 为 UserToken，不需要 Bearer 前缀
             request.Headers.Add("Authorization", Account.UserToken);
 
-            return await _httpClient.SendAsync(request);
+            return await _httpClient.SendAsync(request, cancellationToken);
         }
 
         private async Task<Message> PostJsonAndCheckStatusAsync(string paramsStr)
         {
-            // 如果 TooManyRequests 请求失败，则重拾最多 3 次
-            var count = 5;
-
-            // 已处理的 message id
-            var messageIds = new List<string>();
-            do
+            try
             {
-                HttpResponseMessage response = null;
-                try
-                {
-                    response = await PostJsonAsync(_discordInteractionUrl, paramsStr);
-                    if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
-                    {
-                        return Message.Success();
-                    }
-                    else if (response.StatusCode == HttpStatusCode.TooManyRequests)
-                    {
-                        count--;
-                        if (count > 0)
-                        {
-                            // 等待 3~6 秒
-                            var random = new Random();
-                            var seconds = random.Next(3, 6);
-                            await Task.Delay(seconds * 1000);
+                var result = await _interactionTransport.SendAsync(
+                    ct => PostJsonAsync(_discordInteractionUrl, paramsStr, ct),
+                    () => Account.Enable == true && !Account.Lock,
+                    PauseDiscordSubmissions,
+                    _longToken.Token);
 
-                            _logger.Warning("Http 请求执行频繁，等待重试 {@0}, {@1}, {@2}", paramsStr, response.StatusCode, response.Content);
-                            continue;
-                        }
-                    }
-                    else if (response.StatusCode == HttpStatusCode.NotFound)
-                    {
-                        count--;
+                if (result.Success)
+                    return Message.Success();
 
-                        if (count > 0)
-                        {
-                            // 等待 3~6 秒
-                            var random = new Random();
-                            var seconds = random.Next(3, 6);
-                            await Task.Delay(seconds * 1000);
+                // Do not log prompts, tokens, captcha payloads or raw request bodies.
+                _logger.Warning("Discord 提交未完成，账号 {AccountId}，状态 {Status}，原因 {Reason}",
+                    Account.Id, result.StatusCode, result.Description);
+                return Message.Of(ReturnCode.FAILURE, result.Description);
+            }
+            catch (OperationCanceledException)
+            {
+                return Message.Of(ReturnCode.FAILURE, "提交已取消，未自动重试");
+            }
+        }
 
-                            // 当是 NotFound 时
-                            // 可能是 message id 错乱导致
-                            if (paramsStr.Contains("message_id") && paramsStr.Contains("nonce"))
-                            {
-                                var obj = JObject.Parse(paramsStr);
-                                if (obj.ContainsKey("message_id") && obj.ContainsKey("nonce"))
-                                {
-                                    var nonce = obj["nonce"].ToString();
-                                    var message_id = obj["message_id"].ToString();
-                                    if (!string.IsNullOrEmpty(nonce) && !string.IsNullOrWhiteSpace(message_id))
-                                    {
-                                        messageIds.Add(message_id);
-
-                                        var t = GetRunningTaskByNonce(nonce);
-                                        if (t != null && !string.IsNullOrWhiteSpace(t.ParentId))
-                                        {
-                                            var p = _freeSql.Get<TaskInfo>(t.ParentId);
-                                            if (p != null)
-                                            {
-                                                var newMessageId = p.MessageIds.Where(c => !messageIds.Contains(c)).FirstOrDefault();
-                                                if (!string.IsNullOrWhiteSpace(newMessageId))
-                                                {
-                                                    obj["message_id"] = newMessageId;
-
-                                                    var oldStr = paramsStr;
-                                                    paramsStr = obj.ToString();
-
-                                                    _logger.Warning("Http 可能消息错乱，等待重试 {@0}, {@1}, {@2}, {@3}", oldStr, paramsStr, response.StatusCode, response.Content);
-                                                    continue;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    _logger.Error("Http 请求执行失败 {@0}, {@1}, {@2}", paramsStr, response.StatusCode, response.Content);
-
-                    var error = $"{response.StatusCode}: {paramsStr.Substring(0, Math.Min(paramsStr.Length, 1000))}";
-
-                    // 如果是 403 则直接禁用账号
-                    if (response.StatusCode == HttpStatusCode.Forbidden)
-                    {
-                        _logger.Error("Http 请求没有操作权限，禁用账号 {@0}", paramsStr);
-
-                        Account.Enable = false;
-                        Account.DisabledReason = "请求没有操作权限";
-
-                        _freeSql.Update<DiscordAccount>()
-                            .Set(c => c.DisabledReason, Account.DisabledReason)
-                            .Set(c => c.Enable, Account.Enable)
-                            .Where(c => c.Id == Account.Id)
-                            .ExecuteAffrows();
-
-                        Account.ClearCache();
-
-                        Dispose();
-
-                        return Message.Of(ReturnCode.FAILURE, "请求失败，禁用账号");
-                    }
-
-                    return Message.Of((int)response.StatusCode, error);
-                }
-                catch (HttpRequestException e)
-                {
-                    _logger.Error(e, "Http 请求执行异常 {@0}", paramsStr);
-
-                    return Message.Of(ReturnCode.FAILURE, e.Message?.Substring(0, Math.Min(e.Message.Length, 100)) ?? "未知错误");
-                }
-            } while (true);
+        private void PauseDiscordSubmissions(string reason)
+        {
+            Account.Enable = false;
+            Account.DisabledReason = reason;
+            _freeSql.Update<DiscordAccount>()
+                .Set(c => c.Enable, false)
+                .Set(c => c.DisabledReason, reason)
+                .Where(c => c.Id == Account.Id)
+                .ExecuteAffrows();
+            Account.ClearCache();
+            // Do not call Dispose here: waiting on the worker from its own submission can deadlock.
+            _longToken.Cancel();
+            Wss?.Dispose();
         }
 
         /// <summary>
