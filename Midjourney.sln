@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.8.34330.188
@@ -31,6 +31,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Midjourney.OcelotProxy", "src\Midjourney.OcelotProxy\Midjourney.OcelotProxy.csproj", "{53AC240C-5D18-4263-B52F-C64A68C93D1C}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Midjourney.Tests", "src\Midjourney.Tests\Midjourney.Tests.csproj", "{76451064-A82C-5786-1738-2CB544FBFE8E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Midjourney.Transport.Tests", "src\Midjourney.Transport.Tests\Midjourney.Transport.Tests.csproj", "{6487693B-8079-4E93-AD7E-5B5164C9AB29}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -66,6 +68,10 @@ Global
 		{76451064-A82C-5786-1738-2CB544FBFE8E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{76451064-A82C-5786-1738-2CB544FBFE8E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{76451064-A82C-5786-1738-2CB544FBFE8E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6487693B-8079-4E93-AD7E-5B5164C9AB29}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6487693B-8079-4E93-AD7E-5B5164C9AB29}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6487693B-8079-4E93-AD7E-5B5164C9AB29}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6487693B-8079-4E93-AD7E-5B5164C9AB29}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -78,6 +84,7 @@ Global
 		{8E871CC8-C0B3-40E9-B742-AA2FA456B49E} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 		{53AC240C-5D18-4263-B52F-C64A68C93D1C} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 		{76451064-A82C-5786-1738-2CB544FBFE8E} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{6487693B-8079-4E93-AD7E-5B5164C9AB29} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {2B9B805F-CE67-43CA-B757-F4A3F1CF72AD}
